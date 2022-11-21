@@ -743,6 +743,12 @@ function generateInterfaceDeclaration(
         chunks.push(generateOneofProperty(ctx, messageDesc, oneofIndex, sourceInfo));
       }
       return;
+    } else if (isWithinOneOf(fieldDesc)) {
+      const { oneofIndex } = fieldDesc;
+      if (!processedOneofs.has(oneofIndex)) {
+        processedOneofs.add(oneofIndex);
+        chunks.push(generateOneofTypeProperty(ctx, messageDesc, oneofIndex));
+      }
     }
 
     const info = sourceInfo.lookup(Fields.message.field, index);
@@ -756,6 +762,18 @@ function generateInterfaceDeclaration(
 
   chunks.push(code`}`);
   return joinCode(chunks, { on: "\n" });
+}
+
+function generateOneofTypeProperty(ctx: Context, messageDesc: DescriptorProto, oneofIndex: number): Code {
+  const { options } = ctx;
+  const fields = messageDesc.field.filter((field) => isWithinOneOf(field) && field.oneofIndex === oneofIndex);
+  const unionType = joinCode(
+    fields.map((f) => code`'${maybeSnakeToCamel(f.name, options)}'`),
+    { on: " | " }
+  );
+
+  const name = maybeSnakeToCamel(messageDesc.oneofDecl[oneofIndex].name, options);
+  return code`${name}?: ${unionType},`;
 }
 
 function generateOneofProperty(
@@ -977,6 +995,10 @@ function generateDecode(ctx: Context, fullName: string, messageDesc: DescriptorP
     } else if (isWithinOneOfThatShouldBeUnion(options, field)) {
       let oneofName = maybeSnakeToCamel(messageDesc.oneofDecl[field.oneofIndex].name, options);
       chunks.push(code`message.${oneofName} = { $case: '${fieldName}', ${fieldName}: ${readSnippet} };`);
+    } else if (isWithinOneOf(field)) {
+      let oneofName = maybeSnakeToCamel(messageDesc.oneofDecl[field.oneofIndex].name, options);
+      chunks.push(code`message.${oneofName} = '${fieldName}'`);
+      chunks.push(code`message.${fieldName} = ${readSnippet};`);
     } else {
       chunks.push(code`message.${fieldName} = ${readSnippet};`);
     }
@@ -1582,11 +1604,11 @@ function generateFromPartial(ctx: Context, fullName: string, messageDesc: Descri
 
   if (ctx.options.useExactTypes) {
     chunks.push(code`
-      fromPartial<I extends ${utils.Exact}<${utils.DeepPartial}<${fullName}>, I>>(${paramName}: I): ${fullName} {
+      create<I extends ${utils.Exact}<${utils.DeepPartial}<${fullName}>, I>>(${paramName}: I): ${fullName} {
     `);
   } else {
     chunks.push(code`
-      fromPartial(${paramName}: ${utils.DeepPartial}<${fullName}>): ${fullName} {
+      create(${paramName}: ${utils.DeepPartial}<${fullName}>): ${fullName} {
     `);
   }
 
@@ -1639,13 +1661,13 @@ function generateFromPartial(ctx: Context, fullName: string, messageDesc: Descri
             return code`${from}`;
           } else {
             const type = basicTypeName(ctx, valueField);
-            return code`${type}.fromPartial(${from})`;
+            return code`${type}.create(${from})`;
           }
         } else if (isAnyValueType(field)) {
           return code`${from}`;
         } else {
           const type = basicTypeName(ctx, field);
-          return code`${type}.fromPartial(${from})`;
+          return code`${type}.create(${from})`;
         }
       } else {
         throw new Error(`Unhandled field ${field}`);
