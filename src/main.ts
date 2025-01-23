@@ -2339,6 +2339,8 @@ function generateToJson(
       chunks.push(code`
         if (${messageProperty}?.length) {
           ${jsonProperty} = ${messageProperty}${maybeMap};
+        } else {
+          ${jsonProperty} = [];
         }
       `);
     } else if (isWithinOneOfThatShouldBeUnion(options, field)) {
